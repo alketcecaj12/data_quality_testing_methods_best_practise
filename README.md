@@ -1,9 +1,44 @@
 # Data Quality Pipeline — Profiling + Validation
 
-A Python pipeline for understanding and validating any tabular dataset. The pipeline runs in two sequential steps:
+A Python pipeline for understanding and validating any tabular dataset.
+The pipeline runs in three sequential steps:
 
-1. **Profiling** — explore the dataset: structure, distributions, missing values, correlations, and anomalies
-2. **Validation** — assert quality rules across six dimensions and score the result
+1. **Profiling** (`03_data_profiler.py`) — explore structure, distributions, missing values, correlations
+2. **Validation** (`04_data_validator.py`) — assert quality rules across six standard dimensions
+3. **Advanced checks** (`05_advanced_checks.py`) — statistical depth, cross-column rules, patterns, temporal, schema drift
+
+---
+
+## Project structure
+
+Files are numbered in execution order. The prefix is for human navigation only —
+Python imports use the base name (e.g. `from data_validator import ...`).
+
+```
+data_quality_pipeline/
+│
+├── 01_logger.py              Shared logging — never run directly, imported by all others
+├── 02_generate_data.py       Synthetic data generator — Option A only
+├── 03_data_profiler.py       Profiling module — can be used standalone
+├── 04_data_validator.py      Base validation — six DQOps dimensions
+├── 05_advanced_checks.py     Advanced checks — five additional dimensions
+├── 06_run_pipeline.py        Orchestrator for Option A (local / synthetic CSV)
+├── 07_run_kaggle.py          Entry point for Option B (Kaggle dataset)
+│
+├── logs/                     Auto-created — one timestamped .log file per run
+│   └── dq_pipeline_YYYYMMDD_HHMMSS.log
+│
+├── reports/                  Auto-created by Option A
+│   ├── <dataset>_profile.json / .xlsx / .html
+│   └── <dataset>_validation.json / .xlsx / .html
+│
+└── reports_loans/            Auto-created by Option B
+    ├── loans_preprocessed.csv
+    ├── loans_reference_schema.json    (saved on first run, used for drift detection)
+    ├── loans_profile.json / .xlsx / .html
+    ├── loans_validation.json / .xlsx / .html
+    └── loans_advanced_validation.json / .xlsx / .html
+```
 
 ---
 
@@ -11,201 +46,240 @@ A Python pipeline for understanding and validating any tabular dataset. The pipe
 
 ### Option A — Synthetic data (no external accounts needed)
 
-Generates a realistic financial transaction dataset with deliberately injected quality issues (nulls, negatives, duplicates, date inconsistencies, outliers), then runs the full profiling and validation pipeline on it.
+Generates a realistic financial transaction dataset with deliberately injected
+quality issues (nulls, negatives, duplicates, date inconsistencies, outliers),
+then runs the full pipeline.
 
 ```bash
 pip install pandas numpy openpyxl jinja2 faker scipy matplotlib
 
-python 02_generate_data.py          # generates transactions.csv
-python 05_run_pipeline.py           # runs profiling + validation on it
+python 02_generate_data.py      # generates transactions.csv
+python 06_run_pipeline.py       # profiling + validation on it
 ```
-
-Use this option to explore the pipeline, understand the outputs, or test changes without needing any external data.
-
----
 
 ### Option B — Kaggle dataset (loans and liability)
 
-Downloads the [`matinmahmoudi/loans-and-liability`](https://www.kaggle.com/datasets/matinmahmoudi/loans-and-liability) dataset directly from Kaggle, preprocesses it, and runs the full pipeline automatically.
+Downloads [`matinmahmoudi/loans-and-liability`](https://www.kaggle.com/datasets/matinmahmoudi/loans-and-liability)
+directly, preprocesses it, and runs profiling + advanced validation automatically.
 
 ```bash
 pip install pandas numpy openpyxl jinja2 faker scipy matplotlib kagglehub
 
-python 06_run_kaggle.py
+python 07_run_kaggle.py
 ```
 
-**Kaggle credentials required.** Before running, place your `kaggle.json` in `~/.kaggle/kaggle.json`. Get it from [kaggle.com](https://www.kaggle.com/settings) → API → Create New Token.
+**Kaggle credentials required.** Place your `kaggle.json` in `~/.kaggle/kaggle.json`
+before running. Get it from [kaggle.com](https://www.kaggle.com/settings) → API → Create New Token.
 
 ---
 
-## Files
+## What each file does
 
-The files are numbered in execution order:
-
-```
-01_logger.py          Shared logging module — imported by all others, never run directly
-02_generate_data.py   Synthetic data generator — Option A only
-03_data_profiler.py   Profiling module — can also be used standalone
-04_data_validator.py  Validation module — can also be used standalone
-05_run_pipeline.py    Orchestrator for Option A — runs profiling + validation on any local CSV
-06_run_kaggle.py      Entry point for Option B — downloads Kaggle data then runs everything
-logs/                 Auto-created — one timestamped log file per pipeline run
-reports/              Auto-created — profiling and validation outputs (json, xlsx, html)
-```
-
----
-
-## The six validation dimensions
-
-The framework is structured around the **DQOps six-dimension model**:
-
-| Dimension | What it checks |
-|---|---|
-| **Completeness** | Required columns present, mandatory fields not null, row-level completeness |
-| **Validity** | Values within allowed domains, numeric ranges, correct date formats, no negatives where prohibited |
-| **Uniqueness** | Key fields are free of duplicates |
-| **Consistency** | Relationships between fields are logically coherent (e.g. value date ≥ transaction date) |
-| **Timeliness** | Dates fall within expected ranges, data is not stale |
-| **Accuracy** | Numeric values are within statistically plausible bounds (4σ outlier detection) |
-
-Each check produces a **score from 0–100** and a **status (PASS / WARN / FAIL)**. Thresholds are configurable.
-
----
-
-## Architecture
+### `01_logger.py`
+Centralised logging module. Creates one shared logger instance used by all other
+modules. Outputs to console (coloured, INFO+) and to a rotating file (plain text, DEBUG+).
+Each run produces a new timestamped file in `logs/`.
 
 ```
-Input data
-    │
-    │   Option A                      Option B
-    ├── 02_generate_data.py  ──►      06_run_kaggle.py
-    │   (synthetic CSV)               (kagglehub download + preprocess)
-    │                                         │
-    └────────────────────────────────────────►│
-                                              │
-                                    05_run_pipeline.py
-                                              │
-                          ┌───────────────────┴──────────────────┐
-                          ▼                                       ▼
-               03_data_profiler.py                   04_data_validator.py
-                          │                                       │
-               ┌──────────┴──────────┐             ┌─────────────┴─────────────┐
-               │  Per-column stats   │             │  Completeness             │
-               │  Missing values     │             │  Validity                 │
-               │  Distributions      │             │  Uniqueness               │
-               │  Correlations       │             │  Consistency              │
-               │  Inline charts      │             │  Timeliness               │
-               └──────────┬──────────┘             │  Accuracy                 │
-                          │                        └─────────────┬─────────────┘
-                          │                                       │
-                          └───────────────────┬───────────────────┘
-                                              │
-                              ┌───────────────┼───────────────┐
-                              ▼               ▼               ▼
-                           .json           .xlsx           .html
-                                              │
-                                          01_logger.py
-                                    logs/dq_pipeline_<timestamp>.log
+DEBUG    → every PASS check, column profiled, file written
+WARNING  → every WARN check
+ERROR    → every FAIL check
 ```
 
----
-
-## Output formats
-
-Both profiling and validation produce three output files each:
-
-**JSON** — machine-readable, useful for integrating into broader pipelines or triggering alerts downstream.
-
-**Excel** — human-readable formatted workbook. The profiling workbook has four sheets (Overview, Numeric Profiles, Categorical Profiles, Correlations). The validation workbook has three sheets (Dashboard, All Checks, Failures & Warnings).
-
-**HTML** — self-contained browser-viewable report, shareable without any tooling. Includes inline charts for profiling and colour-coded status badges for validation.
-
----
-
-## Logging
-
-Every pipeline run writes a timestamped log file to `logs/dq_pipeline_YYYYMMDD_HHMMSS.log`.
-
-The console shows INFO and above in colour. The log file captures DEBUG and above in plain text — every column profiled, every check result, every file written.
-
-Log levels map directly to check status:
-
-```
-DEBUG    → PASS checks (visible in file, not on console)
-WARNING  → WARN checks (visible on console in yellow)
-ERROR    → FAIL checks (visible on console in red)
-```
-
-To see only failures from any log file:
-
+Filter failures across all runs:
 ```bash
 grep ERROR logs/dq_pipeline_*.log
 ```
 
 ---
 
-## Data profiling — what it measures per column
-
-| Column type | Metrics produced |
-|---|---|
-| Numeric | Mean, std, min/max, P25/P50/P75/P95, skewness, kurtosis, zero count, negative count, IQR outlier count |
-| Categorical | Cardinality, top-N value frequencies, % coverage |
-| Datetime | Min, max, range in days |
-| Text | Average and max string length, top values |
-
-Dataset-level: overall completeness score, duplicate row detection, memory footprint, correlation matrix with automatic high-correlation warnings (|r| ≥ 0.7).
+### `02_generate_data.py`
+Generates a synthetic financial transaction CSV (`transactions.csv`) with
+3,000 rows and deliberately injected quality issues across all dimensions:
+nulls, negatives, duplicates, date violations, future dates, statistical outliers,
+invalid categorical values. Used for testing without needing real data.
 
 ---
 
-## Configuration
+### `03_data_profiler.py`
+Explores the dataset before validation. Answers: *what do I actually have?*
 
-The validator ships with a default config for financial transaction data. Pass a custom config dict to `DataValidator` to adapt it to any dataset:
+**Per-column metrics:**
 
+| Type | Metrics |
+|---|---|
+| Numeric | mean, std, min/max, P25/P50/P75/P95, skewness, kurtosis, zeros, negatives, IQR outliers |
+| Categorical | cardinality, top-N frequencies, % coverage |
+| Datetime | min, max, range in days |
+| Text | avg/max length, top values |
+
+**Dataset-level:** overall completeness, duplicate rows, memory,
+correlation matrix, automatic warnings (high missing, outlier-heavy columns,
+unexpected unique identifiers, high correlations).
+
+**Outputs:** `.json` (machine-readable), `.xlsx` (4 sheets: Overview / Numeric /
+Categorical / Correlations), `.html` (self-contained with inline charts).
+
+Standalone usage:
+```bash
+python 03_data_profiler.py --input my_data.csv --output reports/my_profile
+```
+
+---
+
+### `04_data_validator.py`
+Validates the dataset against the **DQOps six-dimension model**.
+
+| Dimension | What it checks |
+|---|---|
+| Completeness | Required columns present, mandatory fields not null, row completeness |
+| Validity | Allowed domains, numeric ranges, date formats, no negatives |
+| Uniqueness | Duplicate key detection |
+| Consistency | Cross-field logical rules (e.g. value_date ≥ transaction_date) |
+| Timeliness | Date range bounds, data freshness (staleness check) |
+| Accuracy | Statistical outlier detection (4σ) |
+
+Each check returns a score (0–100) and status (PASS / WARN / FAIL).
+Thresholds are configurable (`warn_threshold`, `fail_threshold`).
+
+**Outputs:** `.json`, `.xlsx` (3 sheets: Dashboard / All Checks / Failures & Warnings), `.html`.
+
+Standalone usage:
+```bash
+python 04_data_validator.py --input my_data.csv --output reports/my_validation
+```
+
+Custom config:
 ```python
 from data_validator import DataValidator
 import pandas as pd
 
 df = pd.read_csv("my_data.csv")
-
 config = {
-    "required_columns":    ["id", "date", "amount", "status"],
-    "not_null_columns":    ["id", "date", "amount"],
+    "required_columns":    ["id", "date", "amount"],
+    "not_null_columns":    ["id", "amount"],
     "unique_columns":      ["id"],
     "numeric_columns":     {"amount": {"min": 0, "max": 1_000_000}},
-    "categorical_columns": {"status": ["ACTIVE", "INACTIVE", "PENDING"]},
+    "categorical_columns": {"status": ["ACTIVE", "INACTIVE"]},
     "date_columns":        ["date"],
     "date_range":          {"date": {"min": "2020-01-01", "max": "today"}},
-    "consistency_rules": [
-        {"name": "end >= start", "col_a": "end_date", "col_b": "start_date", "op": ">="}
+    "consistency_rules":   [{"name": "end >= start", "col_a": "end_date",
+                             "col_b": "start_date", "op": ">="}],
+    "warn_threshold": 0.5,
+    "fail_threshold": 2.0,
+}
+report = DataValidator(df, config=config, dataset_name="My Dataset").run()
+```
+
+---
+
+### `05_advanced_checks.py`
+Extends `DataValidator` with five additional check dimensions.
+Drop-in replacement — same interface, same outputs.
+
+| Dimension | Checks added |
+|---|---|
+| **Statistical** | Benford's Law (chi-squared), Shapiro-Wilk normality, categorical dominance |
+| **Cross-column** | Conditional rules (if A=x then B not null), ratio bounds, mutual exclusivity |
+| **Pattern** | Regex format validation (email, IBAN, phone, postcode), encoding/control chars, whitespace |
+| **Temporal** | Date gap detection, monotonicity, outside-business-hours flagging |
+| **Schema Drift** | Added/removed columns, dtype changes, cardinality drift, mean drift vs reference |
+
+Usage:
+```python
+from advanced_checks import AdvancedDataValidator
+
+advanced_config = {
+    "benford_columns":       ["amount", "installment"],
+    "normality_columns":     ["int.rate", "dti"],
+    "categorical_balance":   {"status": 95.0},
+    "conditional_rules": [
+        {"name": "Approved must have FICO", "when_col": "credit.policy",
+         "when_val": 1, "then_col": "fico", "then_op": "not_null"}
     ],
-    "warn_threshold": 0.5,   # % issues → WARN
-    "fail_threshold": 2.0,   # % issues → FAIL
+    "ratio_checks": [
+        {"name": "installment/income", "numerator": "installment",
+         "denominator": "log.annual.inc", "min": 0.0, "max": 50.0}
+    ],
+    "pattern_checks":             {"email_col": "email"},
+    "whitespace_check_columns":   ["purpose"],
+    "date_sequence_columns":      [{"col": "transaction_date", "max_gap_days": 7}],
+    "reference_schema_path":      "reports/reference_schema.json",
 }
 
-validator = DataValidator(df, config=config, dataset_name="My Dataset")
+validator = AdvancedDataValidator(df, config=base_config,
+                                  advanced_config=advanced_config)
+
+# Save reference schema on first run (subsequent runs detect drift)
+validator.save_reference_schema("reports/reference_schema.json")
+
 report = validator.run()
 ```
 
-The `06_run_kaggle.py` file shows a complete example of a dataset-specific config for the loans dataset.
+---
+
+### `06_run_pipeline.py`
+Orchestrator for Option A. Runs profiling then base validation on any local CSV.
+
+```bash
+python 06_run_pipeline.py --input my_data.csv --output_dir reports/ --name "Q4 Extract"
+```
+
+---
+
+### `07_run_kaggle.py`
+Entry point for Option B. Downloads the loans dataset, preprocesses it,
+runs profiling, base validation, and advanced validation in sequence.
+Saves a reference schema on first run; detects schema drift on subsequent runs.
+
+```bash
+python 07_run_kaggle.py
+```
+
+The loans-specific config (validation rules + advanced checks) lives inside
+this file and serves as a concrete example of how to adapt the pipeline
+to a real dataset.
+
+---
+
+## Validation dimensions — full summary
+
+| # | Dimension | Module | Key checks |
+|---|---|---|---|
+| 1 | Completeness | `04` | Null checks, required columns, row completeness |
+| 2 | Validity | `04` | Domain, range, date format, negatives |
+| 3 | Uniqueness | `04` | Duplicate keys |
+| 4 | Consistency | `04` | Cross-field logical rules |
+| 5 | Timeliness | `04` | Date range, staleness |
+| 6 | Accuracy | `04` | 4σ statistical outliers |
+| 7 | Statistical | `05` | Benford's Law, normality, categorical balance |
+| 8 | Cross-column | `05` | Conditional rules, ratios, mutual exclusivity |
+| 9 | Pattern | `05` | Regex, encoding, whitespace |
+| 10 | Temporal | `05` | Date gaps, monotonicity, business hours |
+| 11 | Schema Drift | `05` | Column set, dtype, cardinality, mean drift |
 
 ---
 
 ## Extending the pipeline
 
-| Extension | How |
+| Goal | How |
 |---|---|
-| Add custom checks | Subclass `DataValidator` and add `check_*` methods |
-| Connect to a database | Replace CSV ingestion with DuckDB or SQLAlchemy query |
-| Schedule daily runs | Wrap `05_run_pipeline.py` in an Airflow DAG or cron job |
-| Email on failure | Add `smtplib` notification when `overall_status == "FAIL"` |
-| Compare runs over time | Load two JSON outputs and diff the dimension scores |
-| Add a new Kaggle dataset | Copy `06_run_kaggle.py`, change the dataset slug and config |
+| Add a custom base check | Subclass `DataValidator`, add a `check_*` method |
+| Add a custom advanced check | Subclass `AdvancedDataValidator`, add a `check_*` method |
+| Connect to a database | Replace CSV ingestion with DuckDB / SQLAlchemy |
+| Schedule daily runs | Wrap `06_run_pipeline.py` in an Airflow DAG |
+| Alert on failure | Add `smtplib` / Slack webhook when `overall_status == "FAIL"` |
+| Add another Kaggle dataset | Copy `07_run_kaggle.py`, update the slug and config |
+| Track quality over time | Load two `.json` report files and diff the dimension scores |
 
 ---
 
 ## Dependencies
 
 ```bash
-pip install pandas numpy openpyxl jinja2 faker scipy matplotlib   # Option A
-pip install kagglehub                                              # Option B only
+# Core (required for all options)
+pip install pandas numpy openpyxl jinja2 faker scipy matplotlib
+
+# Option B only
+pip install kagglehub
 ```
